@@ -1,0 +1,225 @@
+---
+title: "Global Data analysis"
+author: "Ons Hosni - Touaiti Rayen"
+date: "05/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+## Importation des données :
+
+```{r }
+cases=read.csv("C:/Users/LENOVO/Desktop/sem2/Covid TS/Data/daily-cases-covid-19.csv",sep=",")
+View(cases)
+str(cases)
+colnames(cases)
+```
+
+## Exploration des données :  
+
+```{r }
+#Les dates ne sont pas dans une forme propre c'est pour cela qu'on utilise la librairie anytime. 
+library("anytime")
+cases$Date = anytime(as.factor(cases$Date))
+coronaday=subset(cases,Entity!="World")
+coronadaily=aggregate(coronaday["Daily.confirmed.cases..cases."], by=coronaday["Date"],sum)
+plot(x=coronadaily$Date,y=coronadaily$Daily.confirmed.cases..cases.,main="COVID-19 cases by day",xlab="Days",ylab="Number of Cases",type='o',col="orange")
+```
+
+Création d'une série temporelle : 
+
+```{r}
+## Create a daily Date object
+days=seq(as.Date("2019-12-31"), as.Date("2020-03-30"), by = "day")
+covidts=ts(coronadaily$Daily.confirmed.cases..cases.,start=c(2019, as.numeric(format(days[1], "%j"))),frequency = 365)
+as.ts(covidts)
+#-> covidts contains the daily confirmed cases up to 30 MAR 2020 
+```
+Visualisation de la série temporelle : 
+```{r}
+plot.ts(covidts,col="red",main="covid-19 cases-Daily")
+#On peut assumer que ni le modèle additif ou le modèle multiplicatif peuvent bien représenter notre série temporelle
+```
+
+Estimation de la tendance avec la régression simple : 
+
+```{r}
+#Première Méthode : Estimation de la tendance avec la régréssion simple  
+#On retire min si l'on veut que la serie commence par 0
+#On divise sur max si on veut que la derniere valeur soit 1
+t=time(covidts)
+t= (t-min(t))/max(t)
+#Création du modéle linéaire associé :
+regression_lineaire = lm(covidts~t)
+summary(regression_lineaire)
+#interprétation : #remarque:p_value = 1.53e-12<0.05 
+#On rejete h0: La valeur est = 0 et on accepte H1 : il y a une tendance
+plot(covidts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations")
+regression_lineaire.fit = ts(regression_lineaire$fitted.values, frequency = 365, start=c(2019, as.numeric(format(days[1], "%j"))))
+lines(regression_lineaire.fit, col = "yellow", lwd=2)
+```
+2éme methode: Estimation de la tendance avec la regression polynomiale :
+```{r}
+t=time(covidts)
+t= (t-min(t))/max(t)
+s= t^2
+regression_polynomial= lm(covidts ~ s +t)
+
+summary(regression_polynomial)
+#p-value =< 2.2e-16< 0.05 
+plot(covidts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations ")
+regression_polynomial.fit= ts(regression_polynomial$fitted.values,start=c(2019, as.numeric(format(days[1], "%j"))),frequency =365)
+lines(regression_polynomial.fit, col='purple', lwd=2)
+```
+
+3éme méthode : Estimation de la tendance avec le Moving average (Moyenne Mobile): Méthode non paramétrique : n'admet pas de modéle
+
+```{r}
+plot(covidts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations ")
+moving_average =  filter(covidts, method = "convolution", sides = 2, filter= array(1/2,dim = 2 ))
+moving_average = ts(moving_average, start=c(2019, as.numeric(format(days[1], "%j"))), frequency = 365)
+
+
+lines(moving_average, col= 'blue', lwd= 2)
+```
+4éme Methode: Estimation de la tendance avec la methode Loess (polynomiale locale) : une méthode non paramétrique :n'admet pas de modèle
+
+```{r}
+t = 1:length(covidts)
+t = (t-min(t))/max(t)
+plot(covidts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases")
+local_regression = loess(covidts~t)
+summary(local_regression)
+local_regression.fit = ts(local_regression$fitted, start = c(2019, as.numeric(format(days[1], "%j"))), frequency = 365)
+lines(local_regression.fit, col = 'red', lwd= 2)
+```
+
+5éme méthode : Estimation de la tendance avec la methode Spline 
+
+```{r}
+library(mgcv)
+library(nlme)
+plot(covidts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations")
+gam.spl= gam(covidts~ s(t))
+gam.spl.fit = ts(gam.spl$fitted.values, start = c(2019, as.numeric(format(days[1], "%j"))), frequency = 365)
+lines(gam.spl.fit, col = 'green', lwd= 2)
+```
+
+Toutes les représentations de la tendance : 
+
+```{r}
+toutes_les_valeurs = c(moving_average, local_regression.fit, regression_lineaire.fit, regression_polynomial.fit,gam.spl.fit)
+mvav = array(data = "Moving Average", dim = length(moving_average) ) 
+locreg = array(data = "Regression Locale", dim = length(local_regression.fit) )
+linearreg = array(data ="Regression Linéaire", dim = length(regression_lineaire.fit))
+polyreg = array(data ="Regression polynomiale", dim = length(regression_polynomial.fit))
+spline=array(data="Spline", dim=length(gam.spl.fit))
+
+labels = c(mvav, locreg, linearreg, polyreg,spline)
+tableau = data.frame(time = rep(time(covidts),5),toutes_les_valeurs, labels)
+library(ggplot2)
+ggplot(data = tableau) + 
+  aes(x= time, y = toutes_les_valeurs, col = labels) + 
+  geom_line(size =1.5) + xlab('Days') + ggtitle("Les tendances détectées par les différentes méthodes")+
+  ylab("Number of confirmed cases") + theme_linedraw()
+```
+
+Seasonal Data Decomposition :
+
+```{r}
+#covidcomponents=decompose(covidts)
+#On obtient un message d'erreur indiquant que la série temporelle a moins de 2 périodes
+```
+
+Non-Seasonal Decomposition :
+
+```{r}
+library("TTR")
+library("smooth")
+#On veut des prédictions pour les 7 jours qui vont venir à compter d'aujourd'hui 
+#Simple Moving Average is a method of time series smoothing and is actually a very basic forecasting technique.
+predictr=sma(covidts,h=7,silent=FALSE)
+#the fitting model is SMA(1) 
+covidMA1=SMA(covidts,n=1) 
+plot.ts(covidMA1,type='l',col="red",main="Predicted Model")
+```
+
+```{r}
+#Using The Exponetial Smoothing" 
+covidexpsmo=HoltWinters(covidts,gamma=FALSE)
+plot(covidexpsmo)
+covidexpfor=forecast(covidexpsmo,h=7)
+# 7 Days forecast 
+plot(covidexpfor)
+```
+
+
+
+Application des tests de stationnarité ADF et KPSS : 
+
+```{r}
+#ADF test 
+library(tseries)
+adf.test(covidts)
+#p-value=0.99> 0.05 : On accepte l’hypothèse nulle : la série est non stationnaire 
+```
+```{r}
+#KPSS test 
+kpss.test(covidts)
+#p-value=0.01 < 0.05 : On rejette l’hypothèse nulle de stationnarité : la série est non stationnaire
+```
+
+On dessine la fonction d'autocorrelation simple et la fonction d'autocorrelation partielle.
+
+```{r}
+library(forecast)
+acf(covidts)
+#Nous remarquons que les autocorrélations simples sont presque toutes significativement différentes de zero et diminuent lentement
+pacf(covidts)
+#la première autocorélation partielle (k = 1) est significativement différente de zéro cee qui indique que la série n'est pas stationnaire.
+ndADF=ndiffs(covidts, test = "adf")
+
+#ADF =1 
+ndKPSS =ndiffs(covidts, test = "kpss")
+
+#KPSS =2 
+#Each of the tests gave us a difference order 
+#KPSS Test gave us a difference order of 2 while ADF gave d = 1
+```
+
+Notre série étudiée est un processus non stationnaire. Pour stationnairer notre série, nous allons utiliser les différences premières :
+
+```{r}
+library(forecast)
+forecast=auto.arima(covidts,d=2)
+arima= forecast(covidts,model=forecast,h=14)
+plot(arima)
+
+```
+
+
+
+
+
+```{r}
+library("stats")
+res=resid(forecast)
+Box.test(res,type="Ljung-Box")
+#La p-value est grande =0.7079 donc les résidus ne sont pas corrélés.
+#On accepte donc le modèle proposé
+```
+
+```{r}
+#On compare alors le modèle aux valeurs réelles 
+plot(x=covidts,type='l',col='red')
+fitcovid=Arima(covidts,order=c(0,2,4))
+lines(fitted(fitcovid),col='blue')
+```
+
